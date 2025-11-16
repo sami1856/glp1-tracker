@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Elisence — Quality Gates & Validation</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body class="theme-light">
+  <header class="topbar">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22C6.48 22 2 17.52 2 12S6.48 2 12 2s10 4.48 10 10-4.48 10-10 10zm-1.2-6.2 6.9-6.9-1.4-1.4-5.5 5.5-2.3-2.3-1.4 1.4 3.7 3.7z" fill="currentColor"/></svg>
+      <span>Elisence — Phase 4</span>
+    </div>
+    <nav class="links">
+      <a href="/docs" target="_blank" class="navlink">
+        <svg width="18" height="18" viewBox="0 0 24 24"><path d="M4 19V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2zM13 3v4h4" fill="none" stroke="currentColor" stroke-width="2"/></svg>
+        Swagger
+      </a>
+      <a href="/redoc" target="_blank" class="navlink">ReDoc</a>
+      <a href="/v5/healthz" target="_blank" class="navlink">Healthz</a>
+    </nav>
+  </header>
+
+  <main class="container">
+    <section class="statusbar card">
+      <div class="chip" id="chip-health">Health: <span class="dot dot-muted"></span><span class="chip-text">checking…</span></div>
+      <div class="chip" id="chip-openapi">OpenAPI: <span class="dot dot-muted"></span><span class="chip-text">checking…</span></div>
+      <div class="chip" id="chip-ui">UI: <span class="dot dot-muted"></span><span class="chip-text">ready</span></div>
+    </section>
+
+    <section class="card">
+      <h2>Quality Gates & Validation</h2>
+      <p class="muted">Server status and quick actions.</p>
+      <div class="grid">
+        <a class="btn" href="/v5/healthz" target="_blank">Check Healthz</a>
+        <a class="btn" href="/openapi.json" target="_blank">OpenAPI JSON</a>
+        <a class="btn" href="/docs" target="_blank">Swagger UI</a>
+        <a class="btn" href="/redoc" target="_blank">ReDoc</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Admin & Reports</h3>
+      <div class="grid">
+        <a class="btn" href="/v4/admin/schema_versions" target="_blank">Schema Versions</a>
+        <a class="btn" href="/v4/admin/quality_metrics" target="_blank">Quality Metrics</a>
+        <a class="btn" href="/v4/admin/test_results" target="_blank">Test Results</a>
+        <a class="btn" href="/v4/status" target="_blank">Service Status</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>Provenance & Exports</h3>
+      <div class="grid">
+        <a class="btn" href="/v4/provenance/test_bundle" target="_blank">Build Test Bundle</a>
+        <a class="btn" href="/v4/export/summary" target="_blank">Export Summary</a>
+        <a class="btn" href="/v4/provenance/verify_bundle" target="_blank">Verify Bundle</a>
+        <a class="btn" href="/v4/provenance/diff" target="_blank">Diff (A vs B)</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>FHIR & Analytics</h3>
+      <div class="grid">
+        <a class="btn" href="/v4/fhir/MedicationRequest" target="_blank">MedicationRequest</a>
+        <a class="btn" href="/v4/analytics/effectiveness/summary" target="_blank">Effectiveness</a>
+        <a class="btn" href="/v4/analytics/utilization/daily_cached" target="_blank">Utilization (Daily)</a>
+        <a class="btn" href="/v4/analytics/coverage_audit" target="_blank">Coverage Audit</a>
+      </div>
+    </section>
+
+    <section class="card">
+      <h3>UI Files</h3>
+      <p class="muted">Banner quick view:</p>
+      <iframe src="/v4/ui/banner.html" class="banner" loading="lazy" title="UI banner preview"></iframe>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>Elisence © 2025 — UI Live</span>
+  </footer>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,31 @@
+:root{
+  --bg:#f8fafc; --panel:#ffffff; --ink:#0f172a; --muted:#64748b;
+  --line:#e2e8f0; --brand:#111827; --btn:#111827; --btn-ink:#fff;
+  --chip-ok:#16a34a; --chip-bad:#dc2626; --chip-warn:#f59e0b; --chip-muted:#94a3b8;
+}
+*{box-sizing:border-box} html,body{height:100%}
+body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+.topbar{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:12px 18px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:10}
+.brand{display:flex;align-items:center;gap:8px;font-weight:700}
+.links{display:flex;gap:12px;flex-wrap:wrap}
+.navlink{display:inline-flex;align-items:center;gap:8px;text-decoration:none;color:#2563eb}
+.container{max-width:1080px;margin:24px auto;padding:0 18px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 16px 18px;margin-bottom:16px;box-shadow:0 1px 0 rgba(0,0,0,.02)}
+h2,h3{margin:0 0 10px} .muted{color:var(--muted)}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px;margin-top:12px}
+.btn{display:flex;align-items:center;justify-content:center;padding:11px 12px;border-radius:10px;text-decoration:none;background:var(--btn);color:var(--btn-ink);font-weight:600;border:1px solid #0000;transition:.15s box-shadow,.15s transform}
+.btn:hover{box-shadow:0 4px 14px rgba(0,0,0,.08);transform:translateY(-1px)}
+.statusbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.chip{display:inline-flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid var(--line);border-radius:999px;background:#fff}
+.dot{width:10px;height:10px;border-radius:999px;display:inline-block}
+.dot-ok{background:var(--chip-ok)} .dot-bad{background:var(--chip-bad)} .dot-warn{background:var(--chip-warn)} .dot-muted{background:var(--chip-muted)}
+.banner{width:100%;height:260px;border:1px solid var(--line);border-radius:10px;background:#fafafa}
+.footer{text-align:center;color:var(--muted);padding:24px 12px}
+@media (prefers-color-scheme: dark){
+  body.theme-light{background:#0b1220;color:#e5e7eb}
+  body.theme-light .card{background:#0f172a;border-color:#1f2937}
+  body.theme-light .topbar{background:#0f172a;border-color:#1f2937}
+  body.theme-light .btn{background:#2563eb}
+  body.theme-light .navlink{color:#93c5fd}
+  body.theme-light .banner{background:#111827;border-color:#1f2937}
+}
