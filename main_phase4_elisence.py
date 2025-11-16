@@ -3998,37 +3998,67 @@ def check_schema_version(dataset: Dict[str, Any]) -> bool:
     return ok
 
 # ===================== Data Validation (Ranges & Anomalies) =====================
-def validate_numeric_ranges(dataset: Dict[str, Any]) -> Tuple[bool, List[str]]:
+
+# ---------- Quality helpers – numeric range validation (Section 7-B) ----------
+KPI_RANGE_RULES: Dict[str, Dict[str, Dict[str, float]]] = {
+    "utilization": {
+        "days": {"min": 1.0, "max": 365.0},
+        "avg_daily_utilization": {"min": 0.0, "max": 100.0},
+        "total_intakes": {"min": 0.0, "max": 100000.0},
+        "missing_rate": {"min": 0.0, "max": 1.0},
+        "n_users": {"min": 0.0, "max": 10_000_000.0},
+    },
+    "effectiveness": {
+        "window_days": {"min": 1.0, "max": 365.0},
+        "avg_delta_weight": {"min": -200.0, "max": 50.0},
+        "avg_start_weight": {"min": 20.0, "max": 400.0},
+        "avg_current_weight": {"min": 20.0, "max": 400.0},
+        "n_users": {"min": 0.0, "max": 10_000_000.0},
+        "responder_rate": {"min": 0.0, "max": 1.0},
+    },
+    "satisfaction": {
+        "avg_score": {"min": 0.0, "max": 10.0},
+        "n_users": {"min": 0.0, "max": 10_000_000.0},
+        "n_promoters": {"min": 0.0, "max": 10_000_000.0},
+        "n_detractors": {"min": 0.0, "max": 10_000_000.0},
+        "response_rate": {"min": 0.0, "max": 1.0},
+    },
+}
+
+def kpi_validate_numeric_ranges(
+    metric_name: str,
+    payload: Dict[str, Any],
+) -> List[str]:
     errors: List[str] = []
-    # Example guardrails commonly used across KPIs
-    if "active_users" in dataset:
-        v = dataset["active_users"]
-        if not (0 <= v <= 10_000_000):
-            errors.append("active_users out of logical range [0..10M]")
-    if "avg_latency_ms" in dataset:
-        v = float(dataset["avg_latency_ms"])
-        if not (0 <= v <= 60_000):
-            errors.append("avg_latency_ms out of [0..60000]")
-    if "bucket_size" in dataset:
-        v = dataset["bucket_size"]
-        if v < 50:
-            errors.append("k-anonymity violation: bucket_size < 50")
 
-    ok = len(errors) == 0
-    append_validation_event({"level": "OK" if ok else "ERROR", "ts": _now_iso(), "kind": "numeric_ranges", "errors": errors, "sample": dataset})
-    if not ok:
-        write_worm_event("VALIDATION_EVENT", "ERROR", "numeric range violation", {"errors": errors})
-    return ok, errors
+    rules_for_metric = KPI_RANGE_RULES.get(metric_name)
+    if not rules_for_metric:
+        errors.append(f"unknown_metric:{metric_name}")
+        return errors
 
-def flag_anomalies(series: List[float], z: float = 3.5) -> Dict[str, Any]:
-    if not series:
-        return {"flags": [], "mean": None, "stdev": None}
-    m = statistics.mean(series)
-    sd = statistics.pstdev(series) or 1e-9
-    flags = [i for i, v in enumerate(series) if abs((v - m) / sd) > z]
-    evt = {"level":"INFO","ts":_now_iso(),"kind":"anomaly_scan","mean":m,"stdev":sd,"count":len(series),"flags":flags}
-    append_validation_event(evt)
-    return {"flags": flags, "mean": m, "stdev": sd}
+    for field_name, rule in rules_for_metric.items():
+        if field_name not in payload:
+            continue
+
+        value = payload[field_name]
+        if not isinstance(value, (int, float)):
+            errors.append(f"non_numeric:{metric_name}.{field_name}")
+            continue
+
+        min_val = rule.get("min")
+        max_val = rule.get("max")
+
+        if min_val is not None and value < min_val:
+            errors.append(
+                f"out_of_range_min:{metric_name}.{field_name}:{value}"
+            )
+
+        if max_val is not None and value > max_val:
+            errors.append(
+                f"out_of_range_max:{metric_name}.{field_name}:{value}"
+            )
+
+    return errors
 
 # ===================== Synthetic Data (Sandbox) =====================
 async def _sandbox_init():
@@ -4167,15 +4197,35 @@ async def recompute_utilization_daily() -> Dict[str, Any]:
         "kpi_version": "kpi-util-1.0",
         "date": date_iso,
         "active_users": int(active_users),
-        "avg_latency_ms": float(avg_latency_ms)
+        "avg_latency_ms": float(avg_latency_ms),
     }
-    # Gates: version + contract + numeric validation
+
+    # Gates: version + contract + numeric-range validation (utilization KPI)
     if not check_schema_version(artifact):
-        raise HTTPException(status_code=500, detail="schema_version mismatch")
-    ok1, e1 = validate_contract("utilization_daily", artifact)
-    ok2, e2 = validate_numeric_ranges(artifact)
-    if not (ok1 and ok2):
-        raise HTTPException(status_code=500, detail=f"utilization_daily validation failed: {e1+e2}")
+        raise HTTPException(
+            status_code=500,
+            detail="schema version mismatch",
+        )
+
+    # قرارداد JSON (اسکیما) را چک کن
+    errors_contract = validate_contract("utilization", artifact)
+
+    # بازه‌های عددی KPI را چک کن
+    errors_ranges = kpi_validate_numeric_ranges("utilization", artifact)
+
+    all_errors = errors_contract + errors_ranges
+
+    if all_errors:
+        # الان i18n را هم از همین‌جا آماده می‌کنیم
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "ok": False,
+                "errors": all_errors,
+                "lang": "en",  # بعداً multi-language
+            },
+        )
+
     return artifact
 
 @app.get("/v4/_ok")
