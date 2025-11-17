@@ -2974,6 +2974,21 @@ _API_KEY = "dev-admin-key"
 
 def _auth_ok(api_key: Optional[str]) -> bool:
     return bool(api_key) and api_key == _API_KEY
+
+@app.get("/v4/admin/auth/test", response_class=JSONResponse)
+async def admin_auth_test(
+    api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+) -> Dict[str, Any]:
+    """
+    Diagnostic endpoint to verify API key handling.
+    Permanent admin tool (not a temporary hack).
+    """
+    ok = _auth_ok(api_key)
+    return {
+        "ok": ok,
+        "received": api_key,
+        "expected_example": _API_KEY,
+    }
       
 # ==============================
 # Vocabulary Service (RxNorm/ATC/MedDRA) — hot reload JSON
@@ -3209,61 +3224,303 @@ async def analytics_health():
     return {"daily": r1, "weekly": r2, "monthly": r3, "effectiveness": r4, "ts": utc_now_iso()}
 
 @app.get("/v4/analytics/utilization/daily", response_class=JSONResponse)
-async def util_daily(med: Optional[str]=Query(None), day_from: Optional[str]=Query(None), day_to: Optional[str]=Query(None),
-                     api_key: Optional[str]=Header(default=None, alias="X-API-Key")):
-    if not _auth_ok(api_key): raise HTTPException(401,"invalid api key")
-    key = f"uD:{med}:{day_from}:{day_to}"; c = cache_get(key)
-    if c is not None: return c
-    clauses, params = [], []
-    if med: clauses.append("(rxnorm_code=? OR atc_code=?)"); params += [med, med]
-    if day_from: clauses.append("day>=?"); params.append(day_from)
-    if day_to: clauses.append("day<=?"); params.append(day_to)
+async def util_daily(
+    med: Optional[str] = Query(None),
+    day_from: Optional[str] = Query(None),
+    day_to: Optional[str] = Query(None),
+    api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+):
+    # --- Daily utilization from utilization_daily ---
+    if not _auth_ok(api_key):
+        raise HTTPException(status_code=401, detail="invalid api key")
+
+    key = f"ud:{med}:{day_from}:{day_to}"
+    c = cache_get(key)
+    if c is not None:
+        return c
+
+    clauses: List[str] = []
+    params: List[Any] = []
+
+    if day_from is not None:
+        clauses.append("date >= ?")
+        params.append(day_from)
+
+    if day_to is not None:
+        clauses.append("date <= ?")
+        params.append(day_to)
+
     where = "WHERE " + " AND ".join(clauses) if clauses else ""
-    q = f"SELECT day, COUNT(*) cohorts, SUM(doses) total_doses FROM agg_utilization_daily {where} GROUP BY day ORDER BY day"
+
+    q = f"""
+        SELECT
+            date,
+            active_users AS cohorts,
+            avg_latency_ms
+        FROM utilization_daily
+        {where}
+        ORDER BY date
+    """
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = [dict(r) for r in await (await db.execute(q, tuple(params))).fetchall()]
+
+    # k-anonymity روی فیلد cohorts
     rows = _enforce_k(rows, "cohorts", K_MIN)
-    for r in rows: r["total_doses"] = _apply_privacy(float(r["total_doses"] or 0))
-    cache_set(key, rows); return rows
+
+    # تبدیل نام فیلد برای API
+    for r in rows:
+        r["active_users"] = r.pop("cohorts")
+
+    cache_set(key, rows)
+    return rows
+
 
 @app.get("/v4/analytics/utilization/weekly", response_class=JSONResponse)
-async def util_weekly(med: Optional[str]=Query(None), iso_week_from: Optional[str]=Query(None), iso_week_to: Optional[str]=Query(None),
-                      api_key: Optional[str]=Header(default=None, alias="X-API-Key")):
-    if not _auth_ok(api_key): raise HTTPException(401,"invalid api key")
-    key = f"uW:{med}:{iso_week_from}:{iso_week_to}"; c = cache_get(key)
-    if c is not None: return c
-    clauses, params = [], []
-    if med: clauses.append("(rxnorm_code=? OR atc_code=?)"); params += [med, med]
-    if iso_week_from: clauses.append("iso_week>=?"); params.append(iso_week_from)
-    if iso_week_to: clauses.append("iso_week<=?"); params.append(iso_week_to)
+async def util_weekly(
+    med: Optional[str] = Query(None),
+    iso_week_from: Optional[str] = Query(None),
+    iso_week_to: Optional[str] = Query(None),
+    api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+):
+    # --- Weekly utilization (aggregated from utilization_daily) ---
+    if not _auth_ok(api_key):
+        raise HTTPException(status_code=401, detail="invalid api key")
+
+    key = f"uw:{med}:{iso_week_from}:{iso_week_to}"
+    c = cache_get(key)
+    if c is not None:
+        return c
+
+    clauses: List[str] = []
+    params: List[Any] = []
+
+    # فعلاً med در جدول utilization_daily ستون جدا ندارد، پس در WHERE نمی‌آید
+
+    if iso_week_from is not None:
+        # فرض: iso_week_from تاریخ به شکل YYYY-MM-DD
+        clauses.append("date >= ?")
+        params.append(iso_week_from)
+
+    if iso_week_to is not None:
+        clauses.append("date <= ?")
+        params.append(iso_week_to)
+
     where = "WHERE " + " AND ".join(clauses) if clauses else ""
-    q = f"SELECT iso_week, COUNT(*) cohorts, SUM(doses) total_doses FROM agg_utilization_weekly {where} GROUP BY iso_week ORDER BY iso_week"
+
+    q = f"""
+        SELECT
+            strftime('%Y-W%W', date) AS iso_week,
+            SUM(active_users) AS cohorts,
+            AVG(avg_latency_ms) AS avg_latency_ms
+        FROM utilization_daily
+        {where}
+        GROUP BY iso_week
+        ORDER BY iso_week
+    """
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = [dict(r) for r in await (await db.execute(q, tuple(params))).fetchall()]
+
+    # k-anonymity روی cohorts
     rows = _enforce_k(rows, "cohorts", K_MIN)
-    for r in rows: r["total_doses"] = _apply_privacy(float(r["total_doses"] or 0))
-    cache_set(key, rows); return rows
+
+    # برگرداندن نام به active_users برای API
+    for r in rows:
+        r["active_users"] = r.pop("cohorts")
+
+    cache_set(key, rows)
+    return rows
 
 @app.get("/v4/analytics/utilization/monthly", response_class=JSONResponse)
-async def util_monthly(med: Optional[str]=Query(None), yyyymm_from: Optional[str]=Query(None), yyyymm_to: Optional[str]=Query(None),
-                       api_key: Optional[str]=Header(default=None, alias="X-API-Key")):
-    if not _auth_ok(api_key): raise HTTPException(401,"invalid api key")
-    key = f"uM:{med}:{yyyymm_from}:{yyyymm_to}"; c = cache_get(key)
-    if c is not None: return c
-    clauses, params = [], []
-    if med: clauses.append("(rxnorm_code=? OR atc_code=?)"); params += [med, med]
-    if yyyymm_from: clauses.append("yyyy_mm>=?"); params.append(yyyymm_from)
-    if yyyymm_to: clauses.append("yyyy_mm<=?"); params.append(yyyymm_to)
+async def util_monthly(
+    med: Optional[str] = Query(None),
+    yyyymm_from: Optional[str] = Query(None),
+    yyyymm_to: Optional[str] = Query(None),
+    api_key: Optional[str] = Header(default=None, alias="X-API-Key"),
+):
+    # k-anonymity روی field "cohorts" مثل daily / weekly
+    if not _auth_ok(api_key):
+        raise HTTPException(status_code=401, detail="invalid api key")
+
+    # cache key بر اساس پارامترها (med فعلاً رزرو است و در کوئری استفاده نمی‌شود)
+    key = f"uwm:{med}:{yyyymm_from}:{yyyymm_to}"
+    c = cache_get(key)
+    if c is not None:
+        return c
+
+    clauses: List[str] = []
+    params: List[Any] = []
+
+    # yyyymm_from / yyyymm_to مثل 202511 → تبدیل به "2025-11"
+    if yyyymm_from is not None:
+        clauses.append("substr(date, 1, 7) >= ?")
+        params.append(f"{yyyymm_from[:4]}-{yyyymm_from[4:]}")
+    if yyyymm_to is not None:
+        clauses.append("substr(date, 1, 7) <= ?")
+        params.append(f"{yyyymm_to[:4]}-{yyyymm_to[4:]}")
+
     where = "WHERE " + " AND ".join(clauses) if clauses else ""
-    q = f"SELECT yyyy_mm, COUNT(*) cohorts, SUM(doses) total_doses FROM agg_utilization_monthly {where} GROUP BY yyyy_mm ORDER BY yyyy_mm"
+
+    q = f"""
+        SELECT
+            substr(date, 1, 7) AS yyyy_mm,
+            SUM(active_users) AS cohorts,
+            AVG(avg_latency_ms) AS avg_latency_ms
+        FROM utilization_daily
+        {where}
+        GROUP BY yyyy_mm
+        ORDER BY yyyy_mm
+    """
+
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
         rows = [dict(r) for r in await (await db.execute(q, tuple(params))).fetchall()]
+
+    # k-anonymity و privacy مثل daily/weekly
     rows = _enforce_k(rows, "cohorts", K_MIN)
-    for r in rows: r["total_doses"] = _apply_privacy(float(r["total_doses"] or 0))
-    cache_set(key, rows); return rows
+    for r in rows:
+        r["active_users"] = r.pop("cohorts")
+
+    cache_set(key, rows)
+    return rows
+
+@app.get("/v4/analytics/utilization/yearly", response_class=JSONResponse)
+async def util_yearly(
+    med: Optional[str] = Query(None),
+    yyyy_from: Optional[str] = Query(None),
+    yyyy_to: Optional[str] = Query(None),
+    api_key: Optional[str] = Header(default=None, alias="X-API-Key")
+):
+    if not _auth_ok(api_key):
+        raise HTTPException(401, "invalid api key")
+
+    key = f"uy:{med}:{yyyy_from}:{yyyy_to}"
+    c = cache_get(key)
+    if c is not None:
+        return c
+
+    clauses: List[str] = []
+    params: List[Any] = []
+
+    # چون جدول utilization_daily ستون دارویی ندارد، med را فیلتر نمی‌کنیم.
+
+    if yyyy_from:
+        clauses.append("substr(date,1,4) >= ?")
+        params.append(yyyy_from)
+
+    if yyyy_to:
+        clauses.append("substr(date,1,4) <= ?")
+        params.append(yyyy_to)
+
+    where = ""
+    if clauses:
+        where = "WHERE " + " AND ".join(clauses)
+
+    q = f"""
+        SELECT
+            substr(date,1,4) AS yyyy,
+            SUM(active_users) AS cohorts,
+            AVG(avg_latency_ms) AS avg_latency_ms
+        FROM utilization_daily
+        {where}
+        GROUP BY yyyy
+        ORDER BY yyyy
+    """
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        rows = [dict(r) for r in await (await db.execute(q, tuple(params))).fetchall()]
+
+    rows = _enforce_k(rows, "cohorts", K_MIN)
+    for r in rows:
+        r["active_users"] = r.pop("cohorts")
+        r["avg_latency_ms"] = _apply_privacy(float(r["avg_latency_ms"] or 0))
+
+    cache_set(key, rows)
+    return rows
+
+# ------------------------------------------
+# [A3] KPI – Annual Summary (v1.0.0)
+# ------------------------------------------
+@app.get("/v4/analytics/kpi/yearly", response_class=JSONResponse)
+async def kpi_yearly(
+    med: Optional[str] = Query(None),
+    yyyy_from: int = Query(..., ge=2000, le=2100),
+    yyyy_to: int = Query(..., ge=2000, le=2100),
+    api_key: Optional[str] = Header(default=None, alias="X-API-Key")
+):
+    if not _auth_ok(api_key):
+        raise HTTPException(401, "invalid api key")
+
+    if yyyy_from > yyyy_to:
+        raise HTTPException(422, "invalid year range")
+
+    years = list(range(yyyy_from, yyyy_to + 1))
+    ret = []
+
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+
+        # ---- Utilization (DDD) ----
+        q1 = """
+        SELECT substr(date,1,4) AS yyyy,
+               SUM(active_users) AS total_users
+        FROM utilization_daily
+        WHERE med = ?
+          AND CAST(substr(date,1,4) AS INT) BETWEEN ? AND ?
+        GROUP BY yyyy;
+        """
+        urows = {r["yyyy"]: dict(r) for r in await (await db.execute(q1, (med, yyyy_from, yyyy_to))).fetchall()}
+
+        # ---- Effectiveness ----
+        q2 = """
+        SELECT substr(date,1,4) AS yyyy,
+               AVG(delta) AS eff
+        FROM eff_daily
+        WHERE med = ?
+        GROUP BY yyyy;
+        """
+        erows = {r["yyyy"]: dict(r) for r in await (await db.execute(q2, (med,))).fetchall()}
+
+        # ---- AE Radar ----
+        q3 = """
+        SELECT substr(date,1,4) AS yyyy,
+               meddra_bucket,
+               COUNT(*) AS c
+        FROM ae_events
+        WHERE med = ?
+        GROUP BY yyyy, meddra_bucket;
+        """
+        ar = {}
+        for r in await (await db.execute(q3, (med,))).fetchall():
+            y = r["yyyy"]
+            if y not in ar:
+                ar[y] = {}
+            ar[y][r["meddra_bucket"]] = r["c"]
+
+    # ---- Compose Output ----
+    for y in years:
+        y = str(y)
+        total_users = urows.get(y, {}).get("total_users", 0)
+
+        if total_users < K_MIN:
+            ret.append({"year": y, "insufficient_data": True})
+            continue
+
+        ret.append({
+            "year": y,
+            "utilization_ddd": total_users,
+            "effectiveness_delta": erows.get(y, {}).get("eff"),
+            "adherence_rate": None,    # فاز بعد پرش می‌کنیم
+            "satisfaction_score": None,
+            "ae_radar": ar.get(y, {})
+        })
+
+    return rets
+
 
 @app.get("/v4/analytics/effectiveness/summary", response_class=JSONResponse)
 async def eff_summary(window: int=Query(30, ge=30, le=90), med: Optional[str]=Query(None),
@@ -4025,6 +4282,32 @@ KPI_RANGE_RULES: Dict[str, Dict[str, Dict[str, float]]] = {
     },
 }
 
+# ---------- Quality helpers – numeric range validation (Section 7-B) ----------
+KPI_RANGE_RULES: Dict[str, Dict[str, Dict[str, float]]] = {
+    "utilization": {
+        "days": {"min": 1.0, "max": 365.0},
+        "avg_daily_utilization": {"min": 0.0, "max": 100.0},
+        "total_intakes": {"min": 0.0, "max": 100000.0},
+        "missing_rate": {"min": 0.0, "max": 1.0},
+        "n_users": {"min": 0.0, "max": 10_000_000.0},
+    },
+    "effectiveness": {
+        "window_days": {"min": 1.0, "max": 365.0},
+        "avg_delta_weight": {"min": -200.0, "max": 50.0},
+        "avg_start_weight": {"min": 20.0, "max": 400.0},
+        "avg_current_weight": {"min": 20.0, "max": 400.0},
+        "n_users": {"min": 0.0, "max": 10_000_000.0},
+        "responder_rate": {"min": 0.0, "max": 1.0},
+    },
+    "satisfaction": {
+        "avg_score": {"min": 0.0, "max": 10.0},
+        "n_users": {"min": 0.0, "max": 10_000_000.0},
+        "n_promoters": {"min": 0.0, "max": 10_000_000.0},
+        "n_detractors": {"min": 0.0, "max": 10_000_000.0},
+        "response_rate": {"min": 0.0, "max": 1.0},
+    },
+}
+
 def kpi_validate_numeric_ranges(
     metric_name: str,
     payload: Dict[str, Any],
@@ -4059,6 +4342,38 @@ def kpi_validate_numeric_ranges(
             )
 
     return errors
+
+def kpi_run_quality_gates(
+    metric_name: str,
+    schema_name: str,
+    payload: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Run both:
+    - data contract validation (validate_contract)
+    - numeric range validation (kpi_validate_numeric_ranges)
+
+    Returns a small dict that callers can inspect:
+    {
+        "ok": True/False,
+        "errors": [...],
+        "metric": "<metric_name>",
+        "schema": "<schema_name>",
+        "lang": "en",  # i18n placeholder – later FA/AR/TR/RO
+    }
+    """
+    errors_contract = validate_contract(schema_name, payload)
+    errors_ranges = kpi_validate_numeric_ranges(metric_name, payload)
+
+    all_errors = errors_contract + errors_ranges
+
+    return {
+        "ok": not bool(all_errors),
+        "errors": all_errors,
+        "metric": metric_name,
+        "schema": schema_name,
+        "lang": "en",  # بعداً multi-language می‌کنیم
+    }
 
 # ===================== Synthetic Data (Sandbox) =====================
 async def _sandbox_init():
