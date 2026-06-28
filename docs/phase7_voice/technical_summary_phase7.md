@@ -256,7 +256,7 @@ Test:
 
 
 ============================================================
-10) Backup Standard (Saami & Elisa Protocol)
+10) Backup Standard (Elisence Voice Protocol)
 ============================================================
 
 mkdir -p backups  

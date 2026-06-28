@@ -4,7 +4,7 @@
 
 Elisence Health Platform – Integrated Medication Understanding Engine
 Phase 6 — AHE-Aligned Input Processing + User-Safe Medication Logging
-Author: Saami & Elisence AI
+Author: Elisence Research Team
 Version: 1.0
 Status: Approved / Stable / Ready for Government & Investors
 

@@ -2783,7 +2783,7 @@ DB_PATH = os.getenv("ELISENCE_DB", "elisence.db")                 # فاز ۳ و
 API_KEY = os.getenv("ELISENCE_API_KEY", "dev-key-123")            # هدر: X-API-Key
 K_MIN  = int(os.getenv("ELISENCE_K_ANON", "5"))                   # k-Anonymity threshold
 DP_EPS = float(os.getenv("ELISENCE_DP_EPS", "1.0"))               # DP epsilon
-PID_SALT = os.getenv("ELISENCE_PID_SALT", "sami-phase4-salt")     # Salt ناشناس‌سازی شناسه‌ها
+PID_SALT = os.getenv("ELISENCE_PID_SALT", "elisence-phase4-salt")     # Salt ناشناس‌سازی شناسه‌ها
 VOCAB_FILE = os.getenv("ELISENCE_VOCAB_FILE", "vocab_overrides.json")  # hot-reload
 
 # ==============================
